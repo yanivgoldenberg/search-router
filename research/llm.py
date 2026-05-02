@@ -37,13 +37,15 @@ def chat(
 ) -> str:
     """Send chat messages, return assistant text. Raises LLMError on hard failure."""
     last_err: str | None = None
+    has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
     if backend in ("auto", "groq"):
         try:
             return _groq(messages, model or GROQ_DEFAULT_MODEL, max_tokens, temperature, json_mode)
         except LLMError as e:
             last_err = f"groq: {e}"
-            logger.warning("Groq failed (%s), falling back to Anthropic", e)
-    if backend in ("auto", "anthropic"):
+            if has_anthropic:
+                logger.warning("Groq failed (%s), falling back to Anthropic", e)
+    if backend in ("auto", "anthropic") and has_anthropic:
         try:
             return _anthropic(messages, ANTHROPIC_MODEL, max_tokens, temperature, json_mode)
         except LLMError as e:

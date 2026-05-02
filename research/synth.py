@@ -74,7 +74,7 @@ def synthesize(question: str, claims: list[ExtractedClaim], sources: list[Source
             max_tokens=6000,
             temperature=0.2,
         )
-    except LLMError as e:
+    except Exception as e:
         logger.error("[synth] LLM failed: %s", e)
         return {
             "executive_summary": f"Synthesis failed: {e}",

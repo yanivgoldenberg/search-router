@@ -45,7 +45,7 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
             temperature=0.1,
             model=os.environ.get("GROQ_EXTRACT_MODEL", "llama-3.3-70b-versatile"),
         )
-    except LLMError as e:
+    except Exception as e:
         logger.warning("[extract] LLM failed for %s: %s", src.url[:60], e)
         return ExtractedSourceFacts(url=src.url)
 
