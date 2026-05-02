@@ -81,15 +81,18 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
 
 
 def extract_all(question: str, sources: list[SourceMeta], max_workers: int = 1) -> list[ExtractedSourceFacts]:
-    logger.info("[extract] LLM-extracting facts from %d sources", len(sources))
+    import time as _time
+    logger.info("[extract] LLM-extracting facts from %d sources (sequential, paced)", len(sources))
     out: list[ExtractedSourceFacts] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futs = [ex.submit(_extract_one, question, s) for s in sources]
-        for fut in as_completed(futs):
-            try:
-                out.append(fut.result())
-            except Exception as e:
-                logger.warning("extract future failed: %s", e)
+    pace = float(os.environ.get("RESEARCH_EXTRACT_PACE_S", "12"))
+    for i, s in enumerate(sources):
+        if i > 0:
+            _time.sleep(pace)
+        try:
+            out.append(_extract_one(question, s))
+        except Exception as e:
+            logger.warning("extract failed: %s", e)
+            out.append(ExtractedSourceFacts(url=s.url))
     total_claims = sum(len(f.claims) for f in out)
     logger.info("[extract] extracted %d claims across %d sources", total_claims, len(out))
     return out
