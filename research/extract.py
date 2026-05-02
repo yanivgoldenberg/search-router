@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
-    body = (src.body or "")[:6000]
+    body = (src.body or "")[:10000]
     if not body:
         return ExtractedSourceFacts(url=src.url)
 
