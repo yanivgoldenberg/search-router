@@ -184,17 +184,18 @@ _RESEARCH_JOBS_LOCK = threading.Lock()
 
 
 def _run_research_bg(job_id: str, req_dict: dict[str, Any]) -> None:
+    from research.persist import save_job_state
     try:
         req = ResearchRequest(**req_dict)
         report = run_research(req)
+        md = render_markdown(report)
+        report_dict = report.model_dump()
+        save_job_state(job_id, "complete", report=report_dict, markdown=md)
         with _RESEARCH_JOBS_LOCK:
-            _RESEARCH_JOBS[job_id] = {
-                "status": "complete",
-                "report": report.model_dump(),
-                "markdown": render_markdown(report),
-            }
+            _RESEARCH_JOBS[job_id] = {"status": "complete", "report": report_dict, "markdown": md}
     except Exception as e:
         logger.exception("[research-bg] failed")
+        save_job_state(job_id, "error", error=str(e))
         with _RESEARCH_JOBS_LOCK:
             _RESEARCH_JOBS[job_id] = {"status": "error", "error": str(e)}
 
@@ -230,6 +231,8 @@ def research_start(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid request: {e}") from e
     job_id = str(_uuid.uuid4())[:16]
+    from research.persist import save_job_state
+    save_job_state(job_id, "running")
     with _RESEARCH_JOBS_LOCK:
         _RESEARCH_JOBS[job_id] = {"status": "running"}
     threading.Thread(target=_run_research_bg, args=(job_id, payload), daemon=True).start()
@@ -238,8 +241,11 @@ def research_start(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/v1/research/{job_id}")
 def research_poll(job_id: str) -> dict[str, Any]:
+    from research.persist import load_job_state
     with _RESEARCH_JOBS_LOCK:
         job = _RESEARCH_JOBS.get(job_id)
+    if job is None:
+        job = load_job_state(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return {"job_id": job_id, **job}
@@ -248,8 +254,11 @@ def research_poll(job_id: str) -> dict[str, Any]:
 @app.get("/v1/research/{job_id}/markdown")
 def research_poll_markdown(job_id: str) -> Any:
     from fastapi.responses import PlainTextResponse
+    from research.persist import load_job_state
     with _RESEARCH_JOBS_LOCK:
         job = _RESEARCH_JOBS.get(job_id)
+    if job is None:
+        job = load_job_state(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     if job.get("status") == "running":

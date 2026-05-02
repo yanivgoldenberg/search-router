@@ -178,3 +178,60 @@ def render_markdown(report: ResearchReport) -> str:
             lines.append(f"- {c.text} _(quote not found in {c.source_url})_")
 
     return "\n".join(lines)
+
+
+def save_job_state(job_id: str, status: str, report=None, markdown="", error="") -> bool:
+    if psycopg2 is None:
+        return False
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS research_jobs (
+                    id          TEXT PRIMARY KEY,
+                    status      TEXT NOT NULL,
+                    started_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    report      JSONB,
+                    markdown    TEXT,
+                    error       TEXT
+                )
+            """)
+            import json as _json
+            cur.execute("""
+                INSERT INTO research_jobs (id, status, report, markdown, error)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                  status = EXCLUDED.status,
+                  report = EXCLUDED.report,
+                  markdown = EXCLUDED.markdown,
+                  error = EXCLUDED.error,
+                  updated_at = NOW()
+            """, (job_id, status, _json.dumps(report) if report else None, markdown, error))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.warning("[persist] save_job_state failed: %s", e)
+        return False
+
+
+def load_job_state(job_id: str) -> dict | None:
+    if psycopg2 is None:
+        return None
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT status, report, markdown, error FROM research_jobs WHERE id = %s", (job_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            status, report, markdown, error = row
+            out = {"status": status}
+            if report:
+                out["report"] = report
+            if markdown:
+                out["markdown"] = markdown
+            if error:
+                out["error"] = error
+            return out
+    except Exception as e:
+        logger.warning("[persist] load_job_state failed: %s", e)
+        return None
