@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
-    body = (src.body or "")[:10000]
+    body = (src.body or "")[:3500]
     if not body:
         return ExtractedSourceFacts(url=src.url)
 
@@ -43,7 +43,7 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             max_tokens=2000,
             temperature=0.1,
-            model=os.environ.get("GROQ_EXTRACT_MODEL", "llama-3.3-70b-versatile"),
+            model=os.environ.get("GROQ_EXTRACT_MODEL", "llama-3.1-8b-instant"),
         )
     except Exception as e:
         logger.warning("[extract] LLM failed for %s: %s", src.url[:60], e)
