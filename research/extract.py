@@ -5,6 +5,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+import os
 from .llm import LLMError, chat_json
 from .models import ExtractedClaim, ExtractedSourceFacts, SourceMeta
 
@@ -40,8 +41,9 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
     try:
         parsed: Any = chat_json(
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            max_tokens=2500,
+            max_tokens=2000,
             temperature=0.1,
+            model=os.environ.get("GROQ_EXTRACT_MODEL", "llama-3.1-8b-instant"),
         )
     except LLMError as e:
         logger.warning("[extract] LLM failed for %s: %s", src.url[:60], e)
@@ -78,7 +80,7 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
     )
 
 
-def extract_all(question: str, sources: list[SourceMeta], max_workers: int = 3) -> list[ExtractedSourceFacts]:
+def extract_all(question: str, sources: list[SourceMeta], max_workers: int = 2) -> list[ExtractedSourceFacts]:
     logger.info("[extract] LLM-extracting facts from %d sources", len(sources))
     out: list[ExtractedSourceFacts] = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:

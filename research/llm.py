@@ -104,7 +104,7 @@ def _groq(messages: list[dict[str, str]], model: str, max_tokens: int, temperatu
         payload["response_format"] = {"type": "json_object"}
 
     last_err: str = ""
-    for attempt in range(4):
+    for attempt in range(8):
         try:
             resp = requests.post(
                 GROQ_URL,
