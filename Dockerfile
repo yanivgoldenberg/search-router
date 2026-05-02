@@ -2,15 +2,21 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     fastapi==0.128.0 \
     uvicorn[standard]==0.40.0 \
     requests==2.32.3 \
     redis==5.2.1 \
     python-dotenv==1.0.1 \
-    pydantic==2.12.0
+    pydantic==2.12.0 \
+    psycopg2-binary==2.9.10
 
 COPY *.py /app/
+COPY research /app/research/
 
 ENV PORT=8300 HOST=0.0.0.0 LOG_LEVEL=INFO PYTHONUNBUFFERED=1
 

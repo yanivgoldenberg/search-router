@@ -36,6 +36,15 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, str(Path(__file__).parent))
 from search_router import SearchRouter
 
+try:
+    from research.pipeline import run_research
+    from research.models import ResearchRequest
+    from research.persist import render_markdown
+    RESEARCH_AVAILABLE = True
+except Exception as _research_e:
+    RESEARCH_AVAILABLE = False
+    _research_import_error = str(_research_e)
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO"),
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -165,6 +174,41 @@ def openai_compat(payload: dict[str, Any]) -> dict[str, Any]:
             }
         ],
     }
+
+
+@app.post("/v1/research")
+def research_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deep research pipeline. POST {q, mode, max_sources, iterations, save}."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail=f"research module unavailable: {_research_import_error}")
+    try:
+        req = ResearchRequest(**payload)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid request: {e}") from e
+    try:
+        report = run_research(req)
+    except Exception as e:
+        logger.exception("research pipeline failed")
+        raise HTTPException(status_code=500, detail=f"research failed: {e}") from e
+    return {
+        "report": report.model_dump(),
+        "markdown": render_markdown(report),
+    }
+
+
+@app.get("/v1/research/markdown")
+def research_markdown(
+    q: str = Query(...),
+    mode: str = "general",
+    max_sources: int = 30,
+    iterations: int = 1,
+) -> Any:
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from fastapi.responses import PlainTextResponse
+    req = ResearchRequest(q=q, mode=mode, max_sources=max_sources, iterations=iterations)
+    report = run_research(req)
+    return PlainTextResponse(render_markdown(report))
 
 
 if __name__ == "__main__":
