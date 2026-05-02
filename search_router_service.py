@@ -176,9 +176,33 @@ def openai_compat(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+import threading
+import uuid as _uuid
+
+_RESEARCH_JOBS: dict[str, dict[str, Any]] = {}
+_RESEARCH_JOBS_LOCK = threading.Lock()
+
+
+def _run_research_bg(job_id: str, req_dict: dict[str, Any]) -> None:
+    try:
+        req = ResearchRequest(**req_dict)
+        report = run_research(req)
+        with _RESEARCH_JOBS_LOCK:
+            _RESEARCH_JOBS[job_id] = {
+                "status": "complete",
+                "report": report.model_dump(),
+                "markdown": render_markdown(report),
+            }
+    except Exception as e:
+        logger.exception("[research-bg] failed")
+        with _RESEARCH_JOBS_LOCK:
+            _RESEARCH_JOBS[job_id] = {"status": "error", "error": str(e)}
+
+
 @app.post("/v1/research")
 def research_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
-    """Deep research pipeline. POST {q, mode, max_sources, iterations, save}."""
+    """Deep research pipeline. Sync mode (waits up to ~95s).
+    For longer runs use POST /v1/research/start + GET /v1/research/{job_id}."""
     if not RESEARCH_AVAILABLE:
         raise HTTPException(status_code=503, detail=f"research module unavailable: {_research_import_error}")
     try:
@@ -194,6 +218,45 @@ def research_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
         "report": report.model_dump(),
         "markdown": render_markdown(report),
     }
+
+
+@app.post("/v1/research/start")
+def research_start(payload: dict[str, Any]) -> dict[str, Any]:
+    """Kick off research in background. Returns job_id immediately."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    try:
+        ResearchRequest(**payload)  # validate
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid request: {e}") from e
+    job_id = str(_uuid.uuid4())[:16]
+    with _RESEARCH_JOBS_LOCK:
+        _RESEARCH_JOBS[job_id] = {"status": "running"}
+    threading.Thread(target=_run_research_bg, args=(job_id, payload), daemon=True).start()
+    return {"job_id": job_id, "status": "running", "poll": f"/v1/research/{job_id}"}
+
+
+@app.get("/v1/research/{job_id}")
+def research_poll(job_id: str) -> dict[str, Any]:
+    with _RESEARCH_JOBS_LOCK:
+        job = _RESEARCH_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"job_id": job_id, **job}
+
+
+@app.get("/v1/research/{job_id}/markdown")
+def research_poll_markdown(job_id: str) -> Any:
+    from fastapi.responses import PlainTextResponse
+    with _RESEARCH_JOBS_LOCK:
+        job = _RESEARCH_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.get("status") == "running":
+        return PlainTextResponse(f"# Job {job_id} still running...", status_code=202)
+    if job.get("status") == "error":
+        return PlainTextResponse(f"# Job {job_id} errored\n\n{job.get('error')}", status_code=500)
+    return PlainTextResponse(job.get("markdown", ""))
 
 
 @app.get("/v1/research/markdown")
