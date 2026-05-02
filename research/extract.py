@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
-    body = (src.body or "")[:8000]
+    body = (src.body or "")[:6000]
     if not body:
         return ExtractedSourceFacts(url=src.url)
 
@@ -80,7 +80,7 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
     )
 
 
-def extract_all(question: str, sources: list[SourceMeta], max_workers: int = 2) -> list[ExtractedSourceFacts]:
+def extract_all(question: str, sources: list[SourceMeta], max_workers: int = 1) -> list[ExtractedSourceFacts]:
     logger.info("[extract] LLM-extracting facts from %d sources", len(sources))
     out: list[ExtractedSourceFacts] = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:

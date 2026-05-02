@@ -104,7 +104,7 @@ def _groq(messages: list[dict[str, str]], model: str, max_tokens: int, temperatu
         payload["response_format"] = {"type": "json_object"}
 
     last_err: str = ""
-    for attempt in range(8):
+    for attempt in range(4):
         try:
             resp = requests.post(
                 GROQ_URL,
@@ -122,10 +122,10 @@ def _groq(messages: list[dict[str, str]], model: str, max_tokens: int, temperatu
         if resp.status_code == 429:
             retry_after = resp.headers.get("retry-after", "")
             try:
-                wait = float(retry_after) if retry_after else 6 + attempt * 4
+                wait = float(retry_after) if retry_after else 4 + attempt * 3
             except ValueError:
-                wait = 6 + attempt * 4
-            wait = min(wait, 60)
+                wait = 4 + attempt * 3
+            wait = min(wait, 20)
             logger.info("groq 429, sleeping %.1fs (attempt %d)", wait, attempt + 1)
             time.sleep(wait)
             last_err = "rate limited"

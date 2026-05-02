@@ -64,7 +64,7 @@ def run_research(req: ResearchRequest) -> ResearchReport:
         for s in fetched:
             all_sources[s.url] = s
 
-        extracted = extract_all(req.q, fetched, max_workers=2)
+        extracted = extract_all(req.q, fetched, max_workers=1)
         all_extracted.extend(extracted)
 
         all_claims = [c for ex in all_extracted for c in ex.claims]
