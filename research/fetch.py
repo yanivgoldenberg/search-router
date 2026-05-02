@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 JINA_KEY = os.environ.get("JINA_API_KEY", "").strip()
 JINA_URL = "https://r.jina.ai/"
 FETCH_TIMEOUT = float(os.environ.get("RESEARCH_FETCH_TIMEOUT", "30"))
-MAX_BODY_CHARS = int(os.environ.get("RESEARCH_MAX_BODY_CHARS", "60000"))
+MAX_BODY_CHARS = int(os.environ.get("RESEARCH_MAX_BODY_CHARS", "12000"))
 MAX_WORKERS = int(os.environ.get("RESEARCH_FETCH_WORKERS", "10"))
 
 
