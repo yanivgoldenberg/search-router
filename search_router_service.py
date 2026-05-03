@@ -239,6 +239,27 @@ def research_start(payload: dict[str, Any]) -> dict[str, Any]:
     return {"job_id": job_id, "status": "running", "poll": f"/v1/research/{job_id}"}
 
 
+@app.get("/v1/research/history")
+def research_history(q: str = Query(..., description="full-text query"), limit: int = 20) -> dict[str, Any]:
+    """Search past research sessions by full-text over question + report markdown."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import search_history
+    return {"q": q, "results": search_history(q, limit=limit)}
+
+
+@app.get("/v1/research/session/{session_id}")
+def research_session(session_id: str) -> dict[str, Any]:
+    """Fetch a saved research session by its UUID."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import get_session
+    out = get_session(session_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return out
+
+
 @app.get("/v1/research/{job_id}")
 def research_poll(job_id: str) -> dict[str, Any]:
     from research.persist import load_job_state
@@ -283,27 +304,6 @@ def research_markdown(
     return PlainTextResponse(render_markdown(report))
 
 
-
-
-@app.get("/v1/research/history")
-def research_history(q: str = Query(..., description="full-text query"), limit: int = 20) -> dict[str, Any]:
-    """Search past research sessions by full-text over question + report markdown."""
-    if not RESEARCH_AVAILABLE:
-        raise HTTPException(status_code=503, detail="research module unavailable")
-    from research.persist import search_history
-    return {"q": q, "results": search_history(q, limit=limit)}
-
-
-@app.get("/v1/research/session/{session_id}")
-def research_session(session_id: str) -> dict[str, Any]:
-    """Fetch a saved research session by its UUID."""
-    if not RESEARCH_AVAILABLE:
-        raise HTTPException(status_code=503, detail="research module unavailable")
-    from research.persist import get_session
-    out = get_session(session_id)
-    if out is None:
-        raise HTTPException(status_code=404, detail="session not found")
-    return out
 
 
 @app.post("/v1/recall")
