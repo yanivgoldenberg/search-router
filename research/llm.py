@@ -100,8 +100,6 @@ def chat(
     candidates: list[tuple[str, callable]] = []
     if backend in ("auto", "waterfall") and WATERFALL_URL:
         candidates.append(("waterfall", lambda: _waterfall(messages, model or WATERFALL_MODEL, max_tokens, temperature, json_mode)))
-        if backend == "auto" and os.environ.get("LLM_WATERFALL_EXCLUSIVE", "1") == "1":
-            return _run_candidates(candidates, est_tokens)
     if backend in ("auto", "groq") and _have_key("GROQ_API_KEY"):
         candidates.append(("groq", lambda: _groq(messages, model or GROQ_DEFAULT_MODEL, max_tokens, temperature, json_mode)))
     if backend in ("auto", "cerebras") and _have_key("CEREBRAS_API_KEY"):
