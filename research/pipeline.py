@@ -41,9 +41,16 @@ MODE_TO_PRIMARY_TYPE = {
 def _apply_mode_search_bias(plan, mode):
     """Bias sub-question search_type toward the mode's primary source type."""
     primary = MODE_TO_PRIMARY_TYPE.get(mode, "serp")
+    # For non-research modes (people / product / competitive / geo / trading)
+    # the planner sometimes picks 'academic' or 'deep' which fires biorxiv /
+    # EDGAR / etc. and pulls totally off-topic papers. Force those queries
+    # back to serp/primary instead.
+    non_academic_modes = {"people", "product", "competitive", "geo", "trading", "general"}
     for sq in plan.sub_questions:
+        if mode in non_academic_modes and sq.search_type in ("academic", "deep"):
+            sq.search_type = primary if primary != "serp" else "serp"
+            continue
         if sq.search_type == "serp" and primary != "serp":
-            # mix: half stay serp, half use primary
             sq.search_type = primary
     return plan
 
