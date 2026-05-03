@@ -15,10 +15,11 @@ from .models import (
     SourceMeta,
     SubQuestion,
 )
-from .persist import ensure_schema, save_session
+from .persist import ensure_schema, render_markdown, save_session
 from .search import fanout_search, rank_and_trim
-from .synth import adversarial_pass, synthesize
+from .synth import adversarial_pass, self_critique_revise, synthesize
 from .verify import verify_claims
+from . import discord_notify as _discord, free_academic as _facad, siyuan_export as _siyuan
 
 
 MODE_TO_PRIMARY_TYPE = {
@@ -126,6 +127,20 @@ def run_research(req: ResearchRequest) -> ResearchReport:
         model_used=GROQ_MODEL,
     )
 
+    if req.tier == 'ultra':
+        final = self_critique_revise(req.q, final, verified, sources_list)
+    try:
+        _discord.notify_completion(
+            question=req.q,
+            summary=final.get("executive_summary", "")[:1200],
+            elapsed_s=round(time.time() - t0, 2),
+            sources_read=len(sources_list),
+            claims=len(all_claims),
+            verified=sum(1 for c in verified),
+        )
+    except Exception as e:
+        logger.debug("discord notify failed: %s", e)
+
     if req.save:
         try:
             ensure_schema()
@@ -134,5 +149,11 @@ def run_research(req: ResearchRequest) -> ResearchReport:
                 logger.info("[research] persisted as session_id=%s", sid)
         except Exception as e:
             logger.warning("[research] persist failed: %s", e)
+        try:
+            md = render_markdown(report)
+            if _siyuan.export_to_siyuan(req.q, md, req.mode):
+                logger.info("[research] exported to SiYuan")
+        except Exception as e:
+            logger.debug("[research] siyuan export skipped: %s", e)
 
     return report

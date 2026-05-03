@@ -117,6 +117,14 @@ def diag() -> dict[str, Any]:
     return out
 
 
+from research.static_ui import UI_HTML
+
+@app.get("/", include_in_schema=False)
+def root_ui():
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(UI_HTML)
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -294,6 +302,36 @@ def research_session(session_id: str) -> dict[str, Any]:
     if out is None:
         raise HTTPException(status_code=404, detail="session not found")
     return out
+
+
+@app.get("/v1/research/session/{session_id}/jsonld")
+def research_session_jsonld(session_id: str) -> dict[str, Any]:
+    """Schema.org JSON-LD representation of a saved research session."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import get_session, render_jsonld
+    s = get_session(session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    rj = s.get("report") or {}
+    if not rj:
+        raise HTTPException(status_code=404, detail="session has no report")
+    # reconstruct ResearchReport-like object via dict shim
+    from research.models import ResearchReport
+    try:
+        report = ResearchReport(**rj)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"could not reconstruct report: {e}") from e
+    return render_jsonld(report)
+
+
+@app.get("/v1/usage")
+def usage_endpoint(provider: str = "") -> dict[str, Any]:
+    """Per-provider monthly usage counters (calls + tokens + estimated cost in cents)."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.cost_cap import get_usage
+    return {"month": __import__("datetime").datetime.utcnow().strftime("%Y-%m"), "by_provider": get_usage(provider or None)}
 
 
 @app.get("/v1/research/{job_id}")

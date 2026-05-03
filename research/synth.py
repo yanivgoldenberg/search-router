@@ -146,3 +146,70 @@ def adversarial_pass(question: str, draft: dict, claims: list, sources: list) ->
     draft["counter_arguments"] = new_counter[:8]
     draft["gaps"] = new_gaps[:10]
     return draft
+
+
+def self_critique_revise(question: str, draft: dict, claims: list, sources: list) -> dict:
+    """Two-call self-critique loop: critic LLM scores draft, then reviser LLM rewrites weak sections.
+    Lift on draft quality. Triggered by tier=ultra.
+    """
+    if not draft.get("executive_summary"):
+        return draft
+    summary = (draft.get("executive_summary") or "")[:1500]
+    sec_text = "\n\n".join(f"## {s.heading}\n{s.body_markdown}" for s in draft.get("sections", []))[:6000]
+
+    crit_system = (
+        "Output JSON only (no prose). You are a harsh editor. Score the draft on:"
+        " 1) clarity (1-10), 2) evidence-strength (1-10), 3) coverage of question (1-10),"
+        " 4) absence-of-handwaving (1-10). For each score < 8, list specific fixes."
+        ' Output: {"scores":{"clarity":N,"evidence":N,"coverage":N,"crispness":N},'
+        '"specific_fixes":["short imperative fix sentence",...]}'
+    )
+    crit_user = f"Question: {question}\n\nSummary:\n{summary}\n\nSections:\n{sec_text}"
+    try:
+        from .llm import chat_json
+        critique = chat_json(
+            [{"role": "system", "content": crit_system}, {"role": "user", "content": crit_user}],
+            max_tokens=1200, temperature=0.2,
+        )
+    except Exception as e:
+        logger.warning("[critique] scoring failed: %s", e)
+        return draft
+
+    if not isinstance(critique, dict):
+        return draft
+    fixes = [str(f) for f in (critique.get("specific_fixes") or []) if f]
+    if not fixes:
+        return draft
+
+    # Revise pass
+    rev_system = (
+        "Output JSON only (no prose). Rewrite the draft to address EACH specific fix listed."
+        " Keep all [N] citations intact. Same output shape as the original draft:"
+        ' {"executive_summary":"...","sections":[{"heading":"...","body_markdown":"..."}]}'
+    )
+    rev_user = (
+        f"Draft summary:\n{summary}\n\nDraft sections:\n{sec_text}\n\n"
+        f"FIXES TO APPLY:\n- " + "\n- ".join(fixes[:8])
+    )
+    try:
+        revised = chat_json(
+            [{"role": "system", "content": rev_system}, {"role": "user", "content": rev_user}],
+            max_tokens=6000, temperature=0.2,
+        )
+    except Exception as e:
+        logger.warning("[critique] revise failed: %s", e)
+        return draft
+
+    if isinstance(revised, dict) and revised.get("executive_summary"):
+        draft["executive_summary"] = str(revised.get("executive_summary", ""))[:3000]
+        new_sections = []
+        for s in revised.get("sections", []) or []:
+            if isinstance(s, dict):
+                from .models import ResearchSection
+                new_sections.append(ResearchSection(
+                    heading=str(s.get("heading", ""))[:200],
+                    body_markdown=str(s.get("body_markdown", "")),
+                ))
+        if new_sections:
+            draft["sections"] = new_sections
+    return draft

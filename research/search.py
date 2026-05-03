@@ -105,17 +105,27 @@ def fanout_search(sub_questions: list[SubQuestion], num_per_query: int = 8) -> l
     queries_total = len(jobs)
     logger.info("[search] firing %d search queries across %d sub-questions", queries_total, len(sub_questions))
 
-    # Add wayback for any "deep" or "academic" queries
+    # Add wayback for "deep"/"academic" queries
     wayback_jobs = []
+    facad_jobs = []
     for sq in sub_questions:
         if sq.search_type in ("deep", "academic"):
             for q in sq.search_queries[:2]:
                 wayback_jobs.append((sq, q))
+        if sq.search_type == "academic":
+            for q in sq.search_queries[:2]:
+                facad_jobs.append((sq, q, "academic"))
 
+    from . import free_academic as _facad
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futs = {ex.submit(_aisearch_one, q, st, num_per_query): (sq, q) for sq, q, st in jobs}
         for sq, q in wayback_jobs:
             futs[ex.submit(_wayback_search, q, 5)] = (sq, q)
+        for sq, q, kind in facad_jobs:
+            futs[ex.submit(lambda qq=q: (_facad.edgar_full_text_search(qq, 5) or {}).get("results", []))] = (sq, q)
+            futs[ex.submit(lambda qq=q: (_facad.biorxiv_search(qq, 5, 'biorxiv') or {}).get("results", []))] = (sq, q)
+            futs[ex.submit(lambda qq=q: (_facad.biorxiv_search(qq, 5, 'medrxiv') or {}).get("results", []))] = (sq, q)
+            futs[ex.submit(lambda qq=q: (_facad.clinicaltrials_search(qq, 3) or {}).get("results", []))] = (sq, q)
         for fut in as_completed(futs):
             sq, _q = futs[fut]
             try:

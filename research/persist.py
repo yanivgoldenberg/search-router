@@ -379,3 +379,26 @@ def watch_delete(watch_id: str) -> bool:
     except Exception as e:
         logger.warning("[persist] watch_delete failed: %s", e)
         return False
+
+
+def render_jsonld(report) -> dict:
+    """Schema.org JSON-LD representation. Each research becomes citable AI-search content."""
+    citations = []
+    for i, s in enumerate(report.sources, 1):
+        citations.append({
+            "@type": "WebPage",
+            "@id": s.url,
+            "name": s.title or s.url,
+            "url": s.url,
+        })
+    return {
+        "@context": "https://schema.org",
+        "@type": "Report",
+        "headline": report.question,
+        "datePublished": report.started_at,
+        "author": {"@type": "Organization", "name": "Yaniv Goldenberg Research"},
+        "abstract": report.executive_summary,
+        "articleBody": render_markdown(report),
+        "citation": citations,
+        "keywords": list({s.title.split(":")[0] for s in report.sources if s.title})[:20],
+    }
