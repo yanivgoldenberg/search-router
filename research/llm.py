@@ -20,6 +20,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+WATERFALL_URL = os.environ.get("LLM_WATERFALL_URL", "").rstrip("/")
+WATERFALL_MODEL = os.environ.get("LLM_WATERFALL_MODEL", "waterfall")
+WATERFALL_KEY = os.environ.get("LLM_WATERFALL_KEY", "").strip()
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
@@ -95,6 +98,10 @@ def chat(
     est_tokens = sum(len(m.get("content", "")) for m in messages) // 4 + max_tokens
 
     candidates: list[tuple[str, callable]] = []
+    if backend in ("auto", "waterfall") and WATERFALL_URL:
+        candidates.append(("waterfall", lambda: _waterfall(messages, model or WATERFALL_MODEL, max_tokens, temperature, json_mode)))
+        if backend == "auto" and os.environ.get("LLM_WATERFALL_EXCLUSIVE", "1") == "1":
+            return _run_candidates(candidates, est_tokens)
     if backend in ("auto", "groq") and _have_key("GROQ_API_KEY"):
         candidates.append(("groq", lambda: _groq(messages, model or GROQ_DEFAULT_MODEL, max_tokens, temperature, json_mode)))
     if backend in ("auto", "cerebras") and _have_key("CEREBRAS_API_KEY"):
@@ -108,10 +115,14 @@ def chat(
     if backend in ("auto", "anthropic") and _have_key("ANTHROPIC_API_KEY"):
         candidates.append(("anthropic", lambda: _anthropic(messages, ANTHROPIC_MODEL, max_tokens, temperature, json_mode)))
 
+    return _run_candidates(candidates, est_tokens)
+
+
+def _run_candidates(candidates, est_tokens: int) -> str:
     if not candidates:
         raise LLMError("no LLM provider configured")
+    last_err: str | None = None
 
-    # Sort by least-loaded bucket first
     def _load(name_fn):
         name = name_fn[0]
         with _BUCKET_LOCK:
@@ -226,6 +237,11 @@ def _openai_compat_call(provider: str, url: str, key: str, model: str, messages,
 
 def _groq(messages, model, max_tokens, temperature, json_mode) -> str:
     return _openai_compat_call("groq", GROQ_URL, os.environ["GROQ_API_KEY"], model, messages, max_tokens, temperature, json_mode)
+
+
+def _waterfall(messages, model, max_tokens, temperature, json_mode) -> str:
+    url = f"{WATERFALL_URL}/v1/chat/completions"
+    return _openai_compat_call("waterfall", url, WATERFALL_KEY or "none", model, messages, max_tokens, temperature, json_mode)
 
 
 def _cerebras(messages, max_tokens, temperature, json_mode) -> str:
