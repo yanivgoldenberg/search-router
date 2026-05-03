@@ -19,6 +19,7 @@ from .models import (
 from .persist import ensure_schema, render_markdown, save_session
 from .search import fanout_search, rank_and_trim
 from .synth import adversarial_pass, self_critique_revise, synthesize
+from .synth_longctx import synthesize_longctx
 from .verify import verify_claims
 from . import discord_notify as _discord, free_academic as _facad, siyuan_export as _siyuan
 
@@ -60,8 +61,11 @@ def _gap_subquestions(report_partial: dict, original: str) -> list[SubQuestion]:
 
 def run_research(req: ResearchRequest) -> ResearchReport:
     t0 = time.time()
-    logger.info("[research] question=%s mode=%s max_sources=%d iterations=%d",
-                req.q[:80], req.mode, req.max_sources, req.iterations)
+    logger.info("[research] question=%s mode=%s tier=%s max_sources=%d iterations=%d",
+                req.q[:80], req.mode, req.tier, req.max_sources, req.iterations)
+    use_longctx = (req.tier == 'ultra') and bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+    if req.tier == 'ultra' and not use_longctx:
+        logger.info("[research] tier=ultra requested but OPENROUTER_API_KEY missing, falling back to standard extract+synth")
 
     # Auto-detect person-query intent: bump to people mode if query starts with "who is/was"
     detected_mode = req.mode
@@ -107,24 +111,36 @@ def run_research(req: ResearchRequest) -> ResearchReport:
                 if url in all_sources:
                     all_sources[url].body = None
 
-        extracted = extract_all(req.q, kept, max_workers=1)
-        all_extracted.extend(extracted)
+        if not use_longctx:
+            extracted = extract_all(req.q, kept, max_workers=1)
+            all_extracted.extend(extracted)
 
-        all_claims = [c for ex in all_extracted for c in ex.claims]
-        if it < req.iterations - 1:
-            partial = synthesize(req.q, all_claims, list(all_sources.values()))
-            sub_qs = _gap_subquestions(partial, req.q)
-            if not sub_qs:
-                logger.info("[research] no gaps surfaced; stopping early")
-                break
+            all_claims = [c for ex in all_extracted for c in ex.claims]
+            if it < req.iterations - 1:
+                partial = synthesize(req.q, all_claims, list(all_sources.values()))
+                sub_qs = _gap_subquestions(partial, req.q)
+                if not sub_qs:
+                    logger.info("[research] no gaps surfaced; stopping early")
+                    break
+        else:
+            if it < req.iterations - 1:
+                partial = synthesize_longctx(req.q, list(all_sources.values()))
+                sub_qs = _gap_subquestions(partial, req.q)
+                if not sub_qs:
+                    logger.info("[research] no gaps surfaced; stopping early")
+                    break
 
     sources_list = [s for s in all_sources.values() if s.body]
     all_claims = [c for ex in all_extracted for c in ex.claims]
 
     verified, unverified = verify_claims(all_claims, sources_list)
 
-    final = synthesize(req.q, verified, sources_list)
-    if req.tier in ('premium', 'ultra'):
+    if use_longctx:
+        logger.info("[research] using long-context synthesis (OpenRouter, %d sources)", len(sources_list))
+        final = synthesize_longctx(req.q, sources_list)
+    else:
+        final = synthesize(req.q, verified, sources_list)
+    if req.tier == 'premium' or (req.tier == 'ultra' and not use_longctx):
         final = adversarial_pass(req.q, final, verified, sources_list)
 
     report = ResearchReport(
