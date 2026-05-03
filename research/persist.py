@@ -340,7 +340,7 @@ def watch_create(topic: str, mode: str, schedule: str, alert_url: str = "") -> s
             conn.commit()
         return wid
     except Exception as e:
-        logger.warning("[persist] watch_create failed: %s", e)
+        logger.exception("[persist] watch_create failed: %s", e)
         return None
 
 

@@ -328,14 +328,17 @@ def watch_create_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
     topic = payload.get("topic", "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="missing topic")
-    wid = watch_create(
-        topic=topic,
-        mode=payload.get("mode", "general"),
-        schedule=payload.get("schedule", "0 9 * * 1"),
-        alert_url=payload.get("alert_url", ""),
-    )
+    try:
+        wid = watch_create(
+            topic=topic,
+            mode=payload.get("mode", "general"),
+            schedule=payload.get("schedule", "0 9 * * 1"),
+            alert_url=payload.get("alert_url", ""),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"watch_create raised: {e}") from e
     if wid is None:
-        raise HTTPException(status_code=500, detail="watch_create failed")
+        raise HTTPException(status_code=500, detail="watch_create returned None — check container logs for [persist] watch_create failed")
     return {"watch_id": wid, "topic": topic, "schedule": payload.get("schedule", "0 9 * * 1")}
 
 
