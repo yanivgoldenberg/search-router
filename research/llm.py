@@ -104,7 +104,7 @@ def chat(
     if backend in ("auto", "together") and _have_key("TOGETHER_API_KEY"):
         candidates.append(("together", lambda: _together(messages, max_tokens, temperature, json_mode)))
     if backend in ("auto", "openrouter") and _have_key("OPENROUTER_API_KEY"):
-        candidates.append(("openrouter", lambda: _openrouter(messages, max_tokens, temperature, json_mode)))
+        candidates.append(("openrouter", lambda: _openrouter(messages, max_tokens, temperature, json_mode, model_override=model)))
     if backend in ("auto", "anthropic") and _have_key("ANTHROPIC_API_KEY"):
         candidates.append(("anthropic", lambda: _anthropic(messages, ANTHROPIC_MODEL, max_tokens, temperature, json_mode)))
 
@@ -243,8 +243,8 @@ def _together(messages, max_tokens, temperature, json_mode) -> str:
     return _openai_compat_call("together", TOGETHER_URL, os.environ["TOGETHER_API_KEY"], model, messages, max_tokens, temperature, json_mode)
 
 
-def _openrouter(messages, max_tokens, temperature, json_mode) -> str:
-    model = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+def _openrouter(messages, max_tokens, temperature, json_mode, model_override: str | None = None) -> str:
+    model = model_override or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
     headers_extra = {"HTTP-Referer": "https://aisearch.yanivgoldenberg.com", "X-Title": "aisearch-research"}
     payload: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
     # NOTE: we deliberately do NOT use response_format=json_object — Groq's strict
