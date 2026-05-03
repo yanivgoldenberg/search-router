@@ -103,3 +103,46 @@ def synthesize(question: str, claims: list[ExtractedClaim], sources: list[Source
         "what_would_change_my_mind": [str(w) for w in (parsed.get("what_would_change_my_mind") or []) if w],
         "counter_arguments": [str(c) for c in (parsed.get("counter_arguments") or []) if c],
     }
+
+
+
+def adversarial_pass(question: str, draft: dict, claims: list, sources: list) -> dict:
+    """Run a skeptic-LLM pass over the draft synthesis and merge counter-arguments.
+
+    Doubles cost but materially improves quality on contestable questions.
+    """
+    from .llm import LLMError, chat_json
+    if not draft.get("executive_summary"):
+        return draft
+    summary = (draft.get("executive_summary") or "")[:2000]
+    sec_text = " ".join(s.body_markdown for s in draft.get("sections", []))[:5000]
+    system = (
+        "You are a skeptical reviewer. Find weaknesses in the draft research below. "
+        "Identify: (1) overclaims not strongly supported, (2) missing perspectives, "
+        "(3) contradicting evidence the report should mention, (4) what a domain expert "
+        "would push back on. Output JSON with these fields exactly:\n"
+        '{"weak_claims":["..."],"missing_perspectives":["..."],"counter_arguments":["..."],'
+        '"strongest_objection":"..."}'
+    )
+    user = f"Question: {question}\n\nDraft summary:\n{summary}\n\nDraft sections:\n{sec_text}"
+    try:
+        critique = chat_json(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            max_tokens=2500,
+            temperature=0.4,
+        )
+    except Exception as e:
+        logger.warning("[adversarial] failed: %s", e)
+        return draft
+    if not isinstance(critique, dict):
+        return draft
+    new_counter = (draft.get("counter_arguments") or []) + [str(c) for c in (critique.get("counter_arguments") or []) if c]
+    if critique.get("strongest_objection"):
+        new_counter.insert(0, "STRONGEST OBJECTION: " + str(critique["strongest_objection"]))
+    new_gaps = (draft.get("gaps") or []) + [str(g) for g in (critique.get("missing_perspectives") or []) if g]
+    weak = [str(w) for w in (critique.get("weak_claims") or []) if w]
+    if weak:
+        new_gaps.append("Weak claims flagged by adversarial review: " + "; ".join(weak[:3]))
+    draft["counter_arguments"] = new_counter[:8]
+    draft["gaps"] = new_gaps[:10]
+    return draft

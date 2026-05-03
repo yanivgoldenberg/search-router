@@ -77,7 +77,7 @@ class ResearchRequest(BaseModel):
     max_sources: int = 30
     max_sub_questions: int = 8
     iterations: int = 1
-    mode: Literal["general", "competitive", "academic", "financial", "legal", "medical", "geo", "trading"] = "general"
+    mode: Literal["general", "competitive", "academic", "financial", "legal", "medical", "geo", "trading", "people", "product"] = "general"
     tier: Literal["free", "premium", "ultra"] = "free"
     session_id: Optional[str] = None
     save: bool = True

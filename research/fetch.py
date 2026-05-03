@@ -50,10 +50,60 @@ def _http_fetch(url: str) -> str | None:
     return None
 
 
+
+
+try:
+    import fitz  # PyMuPDF
+    HAVE_PDF = True
+except ImportError:
+    HAVE_PDF = False
+
+
+def _pdf_fetch(url: str) -> str | None:
+    """Download a PDF and extract full text via PyMuPDF."""
+    if not HAVE_PDF:
+        return None
+    try:
+        resp = requests.get(url, timeout=FETCH_TIMEOUT, headers={"User-Agent": "Mozilla/5.0 (compatible; YanivResearch/1.0)"}, stream=True)
+        if resp.status_code != 200:
+            return None
+        ctype = resp.headers.get("content-type", "").lower()
+        is_pdf = "pdf" in ctype or url.lower().endswith(".pdf")
+        if not is_pdf:
+            head = resp.raw.read(5)
+            is_pdf = head[:4] == b"%PDF"
+            if is_pdf:
+                pdf_bytes = head + resp.raw.read()
+            else:
+                return None
+        else:
+            pdf_bytes = resp.content
+        if len(pdf_bytes) > 50 * 1024 * 1024:  # 50MB cap
+            return None
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        chunks = []
+        for page in doc:
+            chunks.append(page.get_text("text"))
+            if len(" ".join(chunks)) > MAX_BODY_CHARS * 3:
+                break
+        doc.close()
+        text = " ".join(chunks)
+        text = " ".join(text.split())  # collapse whitespace
+        return text[:MAX_BODY_CHARS]
+    except Exception as e:
+        logger.debug("pdf %s -> %s", url[:60], e)
+        return None
+
+
 def _fetch_one(src: SourceMeta) -> SourceMeta:
-    body = _jina_fetch(src.url)
+    if src.url.lower().endswith(".pdf"):
+        body = _pdf_fetch(src.url) or _jina_fetch(src.url)
+    else:
+        body = _jina_fetch(src.url)
     if not body:
         body = _http_fetch(src.url)
+    if not body and src.url.lower().endswith(".pdf"):
+        body = _pdf_fetch(src.url)
     if body:
         src.body = body
         src.word_count = len(body.split())

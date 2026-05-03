@@ -17,8 +17,32 @@ from .models import (
 )
 from .persist import ensure_schema, save_session
 from .search import fanout_search, rank_and_trim
-from .synth import synthesize
+from .synth import adversarial_pass, synthesize
 from .verify import verify_claims
+
+
+MODE_TO_PRIMARY_TYPE = {
+    "general": "serp",
+    "competitive": "serp",
+    "academic": "academic",
+    "financial": "serp",
+    "legal": "serp",
+    "medical": "academic",
+    "geo": "serp",
+    "trading": "news",
+    "people": "social",
+    "product": "serp",
+}
+
+
+def _apply_mode_search_bias(plan, mode):
+    """Bias sub-question search_type toward the mode's primary source type."""
+    primary = MODE_TO_PRIMARY_TYPE.get(mode, "serp")
+    for sq in plan.sub_questions:
+        if sq.search_type == "serp" and primary != "serp":
+            # mix: half stay serp, half use primary
+            sq.search_type = primary
+    return plan
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +62,7 @@ def run_research(req: ResearchRequest) -> ResearchReport:
                 req.q[:80], req.mode, req.max_sources, req.iterations)
 
     plan = decompose(req.q, max_sub_questions=req.max_sub_questions, mode=req.mode)
+    plan = _apply_mode_search_bias(plan, req.mode)
     logger.info("[research] decomposed into %d sub-questions", len(plan.sub_questions))
 
     all_sources: dict[str, SourceMeta] = {}
@@ -81,6 +106,8 @@ def run_research(req: ResearchRequest) -> ResearchReport:
     verified, unverified = verify_claims(all_claims, sources_list)
 
     final = synthesize(req.q, verified, sources_list)
+    if req.tier in ('premium', 'ultra'):
+        final = adversarial_pass(req.q, final, verified, sources_list)
 
     report = ResearchReport(
         question=req.q,

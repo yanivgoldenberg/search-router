@@ -10,14 +10,16 @@ from .models import DecomposedPlan, SubQuestion
 logger = logging.getLogger(__name__)
 
 MODE_HINTS = {
-    "general": "general web research",
-    "competitive": "B2B competitive intelligence — funding, headcount, products, pricing, traction",
-    "academic": "scholarly literature — peer-reviewed, citations, methodology",
-    "financial": "financial filings, market data, earnings, valuations, SEC EDGAR",
-    "legal": "case law, statutes, court decisions, legal precedent",
-    "medical": "clinical evidence, RCTs, peer-reviewed medical literature",
-    "geo": "AI search visibility, generative engine optimization, citability",
-    "trading": "market structure, technicals, macro, positioning, real-time",
+    "general": "general web research; mix authoritative + recent + diverse perspectives",
+    "competitive": "B2B competitive intelligence — funding, headcount, products, pricing, traction, hiring, churn, NPS. Pull Crunchbase, LinkedIn, BuiltWith, SimilarWeb, news.",
+    "academic": "scholarly literature — peer-reviewed, citations, methodology, results sections, retraction status. Lead with OpenAlex/arXiv/PubMed. Quote stats verbatim.",
+    "financial": "financial filings, market data, earnings transcripts, valuations, SEC EDGAR 10-K/10-Q. Lead with numbers. Include valuation multiples + growth rates.",
+    "legal": "case law, statutes, court decisions, legal precedent. Quote holdings verbatim. Identify circuit / jurisdiction. Note overturned vs upheld.",
+    "medical": "clinical evidence, RCTs, meta-analyses, peer-reviewed medical literature. PubMed/ClinicalTrials/FDA primary. Flag preprints. Cite n=, p-values, effect sizes verbatim.",
+    "geo": "AI search visibility, generative engine optimization, citability factors, schema markup. What gets cited by ChatGPT/Claude/Gemini/Perplexity.",
+    "trading": "market structure, technicals, macro context, positioning, real-time. Cite levels, spreads, dates. Macro overlay (DXY, yields, VIX).",
+    "people": "professional background, employment history, public statements, controversies, network. LinkedIn + news + court records + speaking history.",
+    "product": "product specs, pricing, user reviews, comparison vs alternatives, switching costs.",
 }
 
 

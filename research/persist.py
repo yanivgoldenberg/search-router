@@ -235,3 +235,147 @@ def load_job_state(job_id: str) -> dict | None:
     except Exception as e:
         logger.warning("[persist] load_job_state failed: %s", e)
         return None
+
+
+WATCHER_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS research_watches (
+    id          UUID PRIMARY KEY,
+    topic       TEXT NOT NULL,
+    mode        TEXT NOT NULL DEFAULT 'general',
+    schedule    TEXT NOT NULL,
+    last_run_at TIMESTAMPTZ,
+    last_session_id UUID,
+    alert_url   TEXT,
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
+
+def ensure_watcher_schema() -> bool:
+    if psycopg2 is None:
+        return False
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute(WATCHER_SCHEMA_SQL)
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.warning("[persist] watcher schema setup failed: %s", e)
+        return False
+
+
+def search_history(query: str, limit: int = 20) -> list[dict]:
+    if psycopg2 is None:
+        return []
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, question, mode, started_at, sources_read, model_used,
+                       LEFT(report_md, 400) as preview
+                FROM research_sessions
+                WHERE to_tsvector('english', question || ' ' || COALESCE(report_md, ''))
+                      @@ plainto_tsquery('english', %s)
+                ORDER BY started_at DESC
+                LIMIT %s
+            """, (query, limit))
+            return [
+                {
+                    "session_id": str(row[0]),
+                    "question": row[1],
+                    "mode": row[2],
+                    "started_at": row[3].isoformat() if row[3] else None,
+                    "sources_read": row[4],
+                    "model_used": row[5],
+                    "preview": row[6],
+                }
+                for row in cur.fetchall()
+            ]
+    except Exception as e:
+        logger.warning("[persist] search_history failed: %s", e)
+        return []
+
+
+def get_session(session_id: str) -> dict | None:
+    if psycopg2 is None:
+        return None
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, question, mode, started_at, completed_at, elapsed_s, sources_read, model_used, report_md, report_json FROM research_sessions WHERE id = %s",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "session_id": str(row[0]),
+                "question": row[1],
+                "mode": row[2],
+                "started_at": row[3].isoformat() if row[3] else None,
+                "completed_at": row[4].isoformat() if row[4] else None,
+                "elapsed_s": row[5],
+                "sources_read": row[6],
+                "model_used": row[7],
+                "markdown": row[8],
+                "report": row[9],
+            }
+    except Exception as e:
+        logger.warning("[persist] get_session failed: %s", e)
+        return None
+
+
+def watch_create(topic: str, mode: str, schedule: str, alert_url: str = "") -> str | None:
+    if psycopg2 is None:
+        return None
+    import uuid as _uuid
+    wid = str(_uuid.uuid4())
+    try:
+        ensure_watcher_schema()
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO research_watches (id, topic, mode, schedule, alert_url) VALUES (%s, %s, %s, %s, %s)",
+                (wid, topic, mode, schedule, alert_url),
+            )
+            conn.commit()
+        return wid
+    except Exception as e:
+        logger.warning("[persist] watch_create failed: %s", e)
+        return None
+
+
+def watch_list() -> list[dict]:
+    if psycopg2 is None:
+        return []
+    try:
+        ensure_watcher_schema()
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id, topic, mode, schedule, last_run_at, alert_url, enabled FROM research_watches ORDER BY created_at DESC")
+            return [
+                {
+                    "id": str(r[0]),
+                    "topic": r[1],
+                    "mode": r[2],
+                    "schedule": r[3],
+                    "last_run_at": r[4].isoformat() if r[4] else None,
+                    "alert_url": r[5],
+                    "enabled": r[6],
+                }
+                for r in cur.fetchall()
+            ]
+    except Exception as e:
+        logger.warning("[persist] watch_list failed: %s", e)
+        return []
+
+
+def watch_delete(watch_id: str) -> bool:
+    if psycopg2 is None:
+        return False
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM research_watches WHERE id = %s", (watch_id,))
+            conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:
+        logger.warning("[persist] watch_delete failed: %s", e)
+        return False

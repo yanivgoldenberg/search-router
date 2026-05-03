@@ -46,6 +46,44 @@ def _aisearch_one(query: str, search_type: str, num: int = 10) -> list[dict]:
         return []
 
 
+
+
+
+def _wayback_search(query: str, num: int = 5) -> list[dict]:
+    """Internet Archive Wayback CDX search — returns historical URLs matching the query."""
+    try:
+        # use IA's full-text search via webhandlers
+        resp = requests.get(
+            "https://archive.org/advancedsearch.php",
+            params={
+                "q": query,
+                "fl[]": "identifier,title,description,url,date",
+                "rows": num,
+                "output": "json",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        results = []
+        for d in data.get("response", {}).get("docs", []):
+            ident = d.get("identifier", "")
+            if not ident:
+                continue
+            url = d.get("url") or f"https://archive.org/details/{ident}"
+            results.append({
+                "url": url,
+                "title": d.get("title", ""),
+                "snippet": (d.get("description", "") or "")[:300],
+                "provider": "wayback.archive",
+            })
+        return results
+    except Exception as e:
+        logger.debug("wayback %s failed: %s", query[:60], e)
+        return []
+
+
 def _dedupe_url(url: str) -> str:
     try:
         p = urlparse(url)
@@ -67,8 +105,17 @@ def fanout_search(sub_questions: list[SubQuestion], num_per_query: int = 8) -> l
     queries_total = len(jobs)
     logger.info("[search] firing %d search queries across %d sub-questions", queries_total, len(sub_questions))
 
+    # Add wayback for any "deep" or "academic" queries
+    wayback_jobs = []
+    for sq in sub_questions:
+        if sq.search_type in ("deep", "academic"):
+            for q in sq.search_queries[:2]:
+                wayback_jobs.append((sq, q))
+
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futs = {ex.submit(_aisearch_one, q, st, num_per_query): (sq, q) for sq, q, st in jobs}
+        for sq, q in wayback_jobs:
+            futs[ex.submit(_wayback_search, q, 5)] = (sq, q)
         for fut in as_completed(futs):
             sq, _q = futs[fut]
             try:

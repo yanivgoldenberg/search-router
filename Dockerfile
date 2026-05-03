@@ -13,7 +13,8 @@ RUN pip install --no-cache-dir \
     redis==5.2.1 \
     python-dotenv==1.0.1 \
     pydantic==2.12.0 \
-    psycopg2-binary==2.9.10
+    psycopg2-binary==2.9.10 \
+    pymupdf==1.25.0
 
 COPY *.py /app/
 COPY research /app/research/
@@ -22,7 +23,7 @@ ENV PORT=8300 HOST=0.0.0.0 LOG_LEVEL=INFO PYTHONUNBUFFERED=1
 
 EXPOSE 8300
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8300/healthz', timeout=3)" || exit 1
 
 CMD ["python3", "search_router_service.py"]

@@ -283,6 +283,81 @@ def research_markdown(
     return PlainTextResponse(render_markdown(report))
 
 
+
+
+@app.get("/v1/research/history")
+def research_history(q: str = Query(..., description="full-text query"), limit: int = 20) -> dict[str, Any]:
+    """Search past research sessions by full-text over question + report markdown."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import search_history
+    return {"q": q, "results": search_history(q, limit=limit)}
+
+
+@app.get("/v1/research/session/{session_id}")
+def research_session(session_id: str) -> dict[str, Any]:
+    """Fetch a saved research session by its UUID."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import get_session
+    out = get_session(session_id)
+    if out is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return out
+
+
+@app.post("/v1/recall")
+def recall_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    """Cross-session recall: search past research for relevant findings."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    q = payload.get("q") or payload.get("query") or ""
+    if not q:
+        raise HTTPException(status_code=400, detail="missing q")
+    from research.persist import search_history
+    return {"q": q, "results": search_history(q, limit=int(payload.get("limit", 20)))}
+
+
+@app.post("/v1/watch")
+def watch_create_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create a recurring research watch. {topic, mode, schedule, alert_url}.
+    schedule is a cron-style string for n8n consumption."""
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import watch_create
+    topic = payload.get("topic", "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="missing topic")
+    wid = watch_create(
+        topic=topic,
+        mode=payload.get("mode", "general"),
+        schedule=payload.get("schedule", "0 9 * * 1"),
+        alert_url=payload.get("alert_url", ""),
+    )
+    if wid is None:
+        raise HTTPException(status_code=500, detail="watch_create failed")
+    return {"watch_id": wid, "topic": topic, "schedule": payload.get("schedule", "0 9 * * 1")}
+
+
+@app.get("/v1/watch")
+def watch_list_endpoint() -> dict[str, Any]:
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import watch_list
+    return {"watches": watch_list()}
+
+
+@app.delete("/v1/watch/{watch_id}")
+def watch_delete_endpoint(watch_id: str) -> dict[str, Any]:
+    if not RESEARCH_AVAILABLE:
+        raise HTTPException(status_code=503, detail="research module unavailable")
+    from research.persist import watch_delete
+    deleted = watch_delete(watch_id)
+    return {"deleted": deleted}
+
+
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
