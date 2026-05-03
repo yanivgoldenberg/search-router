@@ -81,6 +81,42 @@ class CacheClearRequest(BaseModel):
     hl: str = "en"
 
 
+@app.get("/v1/diag")
+def diag() -> dict[str, Any]:
+    """Surface env + connectivity diagnostics for debugging."""
+    import os as _os
+    out = {
+        "env": {
+            "POSTGRES_HOST": _os.environ.get("POSTGRES_HOST", "(unset)"),
+            "POSTGRES_USER": _os.environ.get("POSTGRES_USER", "(unset)"),
+            "POSTGRES_PASSWORD": "***" if _os.environ.get("POSTGRES_PASSWORD") else "(unset)",
+            "RESEARCH_DB": _os.environ.get("RESEARCH_DB", "(unset)"),
+            "POSTGRES_DB": _os.environ.get("POSTGRES_DB", "(unset)"),
+            "REDIS_HOST": _os.environ.get("REDIS_HOST", "(unset)"),
+            "GROQ_API_KEY": "set" if _os.environ.get("GROQ_API_KEY") else "(unset)",
+            "AISEARCH_URL": _os.environ.get("AISEARCH_URL", "(unset)"),
+        },
+    }
+    try:
+        import psycopg2
+        host = _os.environ.get("POSTGRES_HOST", "main-db")
+        port = int(_os.environ.get("POSTGRES_PORT", "5432"))
+        user = _os.environ.get("POSTGRES_USER", "postgres")
+        pw = _os.environ.get("POSTGRES_PASSWORD", "")
+        db = _os.environ.get("RESEARCH_DB", _os.environ.get("POSTGRES_DB", "projects"))
+        conn = psycopg2.connect(host=host, port=port, user=user, password=pw, dbname=db, connect_timeout=5)
+        cur = conn.cursor()
+        cur.execute("SELECT version()")
+        out["pg_version"] = cur.fetchone()[0][:60]
+        cur.execute("SELECT count(*) FROM information_schema.tables WHERE table_name LIKE 'research_%'")
+        out["pg_research_tables"] = cur.fetchone()[0]
+        cur.close(); conn.close()
+        out["pg_connect"] = "OK"
+    except Exception as e:
+        out["pg_connect"] = f"FAIL: {e}"
+    return out
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
