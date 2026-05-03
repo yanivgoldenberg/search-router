@@ -54,7 +54,7 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 def _gap_subquestions(report_partial: dict, original: str) -> list[SubQuestion]:
     out = []
-    for g in (report_partial.get("gaps") or [])[:5]:
+    for g in (report_partial.get("gaps") or [])[:8]:
         out.append(SubQuestion(text=str(g), search_queries=[str(g), f"{original} {g}"], search_type="serp"))
     return out
 
@@ -80,8 +80,11 @@ def run_research(req: ResearchRequest) -> ResearchReport:
     all_sources: dict[str, SourceMeta] = {}
     all_extracted = []
     iterations_run = 0
+    convergence_floor = float(os.environ.get("RESEARCH_CONVERGENCE_FLOOR", "0.05"))
 
     sub_qs = plan.sub_questions
+    prev_bodied_count = 0
+    prev_claim_count = 0
     for it in range(max(1, req.iterations)):
         iterations_run = it + 1
         logger.info("[research] === iteration %d/%d ===", iterations_run, req.iterations)
@@ -115,20 +118,29 @@ def run_research(req: ResearchRequest) -> ResearchReport:
             extracted = extract_all(req.q, kept, max_workers=1)
             all_extracted.extend(extracted)
 
-            all_claims = [c for ex in all_extracted for c in ex.claims]
-            if it < req.iterations - 1:
-                partial = synthesize(req.q, all_claims, list(all_sources.values()))
-                sub_qs = _gap_subquestions(partial, req.q)
-                if not sub_qs:
-                    logger.info("[research] no gaps surfaced; stopping early")
-                    break
-        else:
-            if it < req.iterations - 1:
+        all_claims = [c for ex in all_extracted for c in ex.claims]
+        bodied_count = sum(1 for s in all_sources.values() if s.body)
+
+        if prev_bodied_count > 0:
+            new_bodied_pct = (bodied_count - prev_bodied_count) / max(prev_bodied_count, 1)
+            new_claims_pct = (len(all_claims) - prev_claim_count) / max(prev_claim_count, 1) if prev_claim_count else 1.0
+            logger.info("[research] convergence: +%.1f%% sources, +%.1f%% claims (floor=%.0f%%)",
+                        100 * new_bodied_pct, 100 * new_claims_pct, 100 * convergence_floor)
+            if new_bodied_pct < convergence_floor and (use_longctx or new_claims_pct < convergence_floor):
+                logger.info("[research] convergence reached; stopping after iteration %d", iterations_run)
+                break
+        prev_bodied_count = bodied_count
+        prev_claim_count = len(all_claims)
+
+        if it < req.iterations - 1:
+            if use_longctx:
                 partial = synthesize_longctx(req.q, list(all_sources.values()))
-                sub_qs = _gap_subquestions(partial, req.q)
-                if not sub_qs:
-                    logger.info("[research] no gaps surfaced; stopping early")
-                    break
+            else:
+                partial = synthesize(req.q, all_claims, list(all_sources.values()))
+            sub_qs = _gap_subquestions(partial, req.q)
+            if not sub_qs:
+                logger.info("[research] no gaps surfaced; stopping early")
+                break
 
     sources_list = [s for s in all_sources.values() if s.body]
     all_claims = [c for ex in all_extracted for c in ex.claims]

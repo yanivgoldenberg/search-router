@@ -23,7 +23,7 @@ MODE_HINTS = {
 }
 
 
-def decompose(question: str, max_sub_questions: int = 8, mode: str = "general") -> DecomposedPlan:
+def decompose(question: str, max_sub_questions: int = 12, mode: str = "general") -> DecomposedPlan:
     hint = MODE_HINTS.get(mode, MODE_HINTS["general"])
     system = (
         "Output JSON only (no prose, no markdown fences). You are a research planner. Given a question, break it into independent sub-questions "
@@ -36,10 +36,13 @@ def decompose(question: str, max_sub_questions: int = 8, mode: str = "general") 
         '"rationale":"..."}'
         '\n\nValid search_type values: serp, news, ai, deep, academic, code, social.'
     )
+    floor = min(10, max_sub_questions)
     user = (
         f"Original question: {question}\n\n"
-        f"Generate up to {max_sub_questions} sub-questions. Quality over quantity. "
-        "Avoid trivial or duplicative sub-questions."
+        f"Generate {floor}-{max_sub_questions} sub-questions. Be exhaustive: cover background, definitions, "
+        f"key actors, history, current state, evidence base, contradicting views, gaps, second-order effects, "
+        f"and adjacent context. A real research analyst would NOT stop at 3 sub-questions for a non-trivial query. "
+        f"Avoid trivial or duplicative sub-questions, but do not under-decompose."
     )
 
     parsed: Any = chat_json(
