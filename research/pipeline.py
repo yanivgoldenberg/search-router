@@ -33,7 +33,7 @@ MODE_TO_PRIMARY_TYPE = {
     "medical": "academic",
     "geo": "serp",
     "trading": "news",
-    "people": "social",
+    "people": "serp",
     "product": "serp",
 }
 
