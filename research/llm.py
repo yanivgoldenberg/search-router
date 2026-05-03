@@ -151,28 +151,35 @@ def chat_json(
 
 
 def _parse_json(raw: str) -> Any:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        pass
+    """Robust JSON parse — handles fences, prose, common Llama quirks (key=val instead of key:val)."""
+    import re as _re
+    candidates = []
+    candidates.append(raw)
     s = raw.strip()
     if s.startswith("```"):
         s = s.split("```", 2)[1]
         if s.startswith("json"):
             s = s[4:]
         s = s.split("```", 1)[0]
-    try:
-        return json.loads(s.strip())
-    except json.JSONDecodeError:
-        for c in ("[", "{"):
-            i = raw.find(c)
-            if i >= 0:
-                end = raw.rfind("]" if c == "[" else "}")
-                if end > i:
-                    try:
-                        return json.loads(raw[i:end + 1])
-                    except json.JSONDecodeError:
-                        continue
+    candidates.append(s.strip())
+    # Extract widest balanced JSON block
+    for c in ("{", "["):
+        i = raw.find(c)
+        if i >= 0:
+            end = raw.rfind("]" if c == "[" else "}")
+            if end > i:
+                candidates.append(raw[i:end + 1])
+    # Try Llama's `"key=[` typo fix: replace `"keyName=[` with `"keyName":[`
+    for cand in list(candidates):
+        fixed = _re.sub(r'"(\w+)\s*=\s*\[', r'"\1":[', cand)
+        fixed = _re.sub(r'"(\w+)\s*=\s*"', r'"\1":"', fixed)
+        if fixed != cand:
+            candidates.append(fixed)
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except (json.JSONDecodeError, ValueError):
+            continue
     raise LLMError(f"could not parse JSON: {raw[:300]}")
 
 
@@ -191,6 +198,12 @@ def _openai_compat_call(provider: str, url: str, key: str, model: str, messages,
         _bucket_update(provider, dict(resp.headers))
         if resp.status_code == 200:
             data = resp.json()
+            usage = data.get("usage", {}) or {}
+            try:
+                from . import cost_cap as _cc
+                _cc.record_call(provider, int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0)), 0.0)
+            except Exception:
+                pass
             return data["choices"][0]["message"]["content"]
         if resp.status_code == 429:
             retry_after = resp.headers.get("retry-after", "")
