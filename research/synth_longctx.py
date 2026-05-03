@@ -1,12 +1,7 @@
-"""Long-context synthesis (tier='ultra').
+"""Long-context synthesis (tier=ultra path).
 
-Skips per-source extract and feeds raw source bodies directly into a single
-long-context call (Llama 4 Scout 10M via OpenRouter, free tier). Lets the
-model do its own grounding across all sources at once instead of working
-from pre-distilled claims.
-
-Returns the same dict shape as research.synth.synthesize so the pipeline
-can swap implementations without changes downstream.
+Skips per-source extract. Feeds 10-30 raw source bodies directly into a 1M+ context model.
+Free via OpenRouter's `meta-llama/llama-4-scout:free` (10M context).
 """
 from __future__ import annotations
 
@@ -15,114 +10,89 @@ import os
 from typing import Any
 
 from .llm import LLMError, chat_json
-from .models import SourceMeta
+from .models import ExtractedClaim, ResearchSection, SourceMeta
 
 logger = logging.getLogger(__name__)
 
 
-LONGCTX_MODEL = os.environ.get("OPENROUTER_LONGCTX_MODEL", "meta-llama/llama-4-scout:free")
-LONGCTX_MAX_CHARS = int(os.environ.get("LONGCTX_MAX_CHARS", "8000000"))
-LONGCTX_PER_SOURCE_CHARS = int(os.environ.get("LONGCTX_PER_SOURCE_CHARS", "30000"))
-LONGCTX_MAX_TOKENS = int(os.environ.get("LONGCTX_MAX_TOKENS", "8000"))
+def synthesize_longctx(question: str, sources: list[SourceMeta], target_model: str = "openrouter") -> dict[str, Any]:
+    """Feed raw source bodies into a long-context model in one call."""
+    if not sources:
+        return {"executive_summary": "No sources fetched.", "sections": [], "claims": [],
+                "contradictions": [], "gaps": [], "what_would_change_my_mind": [], "counter_arguments": []}
 
-
-def _format_sources_block(sources: list[SourceMeta]) -> tuple[str, dict[int, str]]:
-    idx_to_url: dict[int, str] = {}
-    parts: list[str] = []
-    total_chars = 0
-    for i, s in enumerate(sources, start=1):
-        body = (s.body or "")[:LONGCTX_PER_SOURCE_CHARS]
+    blocks = []
+    for i, s in enumerate(sources, 1):
+        body = (s.body or s.snippet or "")[:8000]
         if not body:
             continue
-        idx_to_url[i] = s.url
-        block = (
-            f"\n===== SOURCE [{i}] =====\n"
-            f"URL: {s.url}\n"
-            f"TITLE: {s.title}\n"
-            f"PROVIDER: {s.provider}\n"
-            f"--- BODY ---\n{body}\n--- END SOURCE [{i}] ---\n"
-        )
-        if total_chars + len(block) > LONGCTX_MAX_CHARS:
-            logger.info("[longctx] hit max char budget at source %d (%d sources packed)", i, len(parts))
-            break
-        parts.append(block)
-        total_chars += len(block)
-    return "".join(parts), idx_to_url
-
-
-def synthesize_longctx(question: str, sources: list[SourceMeta]) -> dict[str, Any]:
-    """Long-context synthesis. Returns same shape as synth.synthesize()."""
-    bodied = [s for s in sources if s.body]
-    if not bodied:
-        return {
-            "executive_summary": "No source bodies available for long-context synthesis.",
-            "sections": [],
-            "contradictions": [],
-            "gaps": ["All sources fetched without retrievable bodies."],
-            "what_would_change_my_mind": [],
-            "counter_arguments": [],
-        }
-
-    sources_block, _idx_to_url = _format_sources_block(bodied)
+        blocks.append(f"[{i}] {s.title}\n  URL: {s.url}\n  ---\n{body}\n  ---")
+    sources_text = "\n\n".join(blocks)
 
     system = (
-        "Output JSON only (no prose, no markdown fences before or after). You are a senior research analyst with a 10M-token context. "
-        "Synthesize the user's research question using ONLY the source documents provided. Each source has a [N] citation index, use them inline.\n\n"
-        "STRICT RULES:\n"
-        "- Cite every factual statement using [N] indices that match the SOURCE [N] markers in the input.\n"
-        "- Quote verbatim where a direct number, claim, or definition is load-bearing (use double quotes).\n"
-        "- Do NOT invent facts not present in the sources.\n"
-        "- If sources disagree, surface the contradiction explicitly with both [N] citations.\n"
-        "- Identify gaps: important sub-questions that the sources do not answer.\n"
-        "- Generate 'what would change my mind' (3-5 specific evidence types that would falsify your conclusion) "
-        "and 'counter_arguments' (2-3 strongest objections to your synthesis).\n\n"
-        'Output JSON shape:\n'
-        '{"executive_summary":"4-6 sentences with [N] citations","sections":'
-        '[{"heading":"...","body_markdown":"...with [N] citations..."}],'
+        "Output JSON only (no prose, no markdown fences). You are a senior research analyst. "
+        "Read all provided sources and synthesize an answer. Every factual claim must cite [N] indices. "
+        "STRICT: do not invent facts not in the sources. Surface contradictions explicitly.\n\n"
+        "Output shape:\n"
+        '{"executive_summary":"3-5 sentences with [N] citations",'
+        '"sections":[{"heading":"...","body_markdown":"...with [N] citations..."}],'
+        '"claims":[{"text":"...","exact_quote":"<verbatim from source>","source_index":N,"confidence":0.0-1.0}],'
         '"contradictions":["..."],"gaps":["..."],'
         '"what_would_change_my_mind":["..."],"counter_arguments":["..."]}'
     )
-
-    user = (
-        f"Research question:\n{question}\n\n"
-        f"Source documents (cite using [N] markers):\n{sources_block}"
-    )
+    user = f"Question: {question}\n\nSources:\n{sources_text[:300000]}"
 
     try:
-        parsed: Any = chat_json(
+        out: Any = chat_json(
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            max_tokens=LONGCTX_MAX_TOKENS,
-            temperature=0.2,
-            backend="openrouter",
-            model=LONGCTX_MODEL,
+            max_tokens=8000, temperature=0.2, backend=target_model,
         )
     except Exception as e:
-        logger.error("[longctx] OpenRouter failed: %s", e)
-        return {
-            "executive_summary": f"Long-context synthesis failed: {e}",
-            "sections": [],
-            "contradictions": [],
-            "gaps": [f"longctx error: {e}"],
-            "what_would_change_my_mind": [],
-            "counter_arguments": [],
-        }
+        logger.error("[longctx] synth failed: %s — falling back to default backend", e)
+        try:
+            out = chat_json(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                max_tokens=8000, temperature=0.2,
+            )
+        except Exception as e2:
+            return {"executive_summary": f"Long-context synth failed: {e2}",
+                    "sections": [], "claims": [], "contradictions": [], "gaps": [],
+                    "what_would_change_my_mind": [], "counter_arguments": []}
 
-    if not isinstance(parsed, dict):
-        logger.error("[longctx] bad shape: %s", type(parsed).__name__)
-        return {
-            "executive_summary": "Long-context synthesis returned malformed output.",
-            "sections": [],
-            "contradictions": [],
-            "gaps": ["longctx returned non-dict"],
-            "what_would_change_my_mind": [],
-            "counter_arguments": [],
-        }
+    if not isinstance(out, dict):
+        return {"executive_summary": "Long-context synth returned invalid shape.",
+                "sections": [], "claims": [], "contradictions": [], "gaps": [],
+                "what_would_change_my_mind": [], "counter_arguments": []}
+
+    # Build claim objects with source URL
+    claims_raw = out.get("claims", []) or []
+    claims = []
+    for c in claims_raw:
+        if not isinstance(c, dict):
+            continue
+        idx = int(c.get("source_index", 0) or 0) - 1
+        url = sources[idx].url if 0 <= idx < len(sources) else ""
+        claims.append(ExtractedClaim(
+            text=str(c.get("text", "")),
+            exact_quote=str(c.get("exact_quote", ""))[:500],
+            source_url=url,
+            confidence=float(c.get("confidence", 0.5) or 0.5),
+        ))
+
+    sections = []
+    for s in out.get("sections", []) or []:
+        if isinstance(s, dict):
+            sections.append(ResearchSection(
+                heading=str(s.get("heading", ""))[:200],
+                body_markdown=str(s.get("body_markdown", "")),
+            ))
 
     return {
-        "executive_summary": str(parsed.get("executive_summary", ""))[:4000],
-        "sections": parsed.get("sections", []) or [],
-        "contradictions": parsed.get("contradictions", []) or [],
-        "gaps": parsed.get("gaps", []) or [],
-        "what_would_change_my_mind": parsed.get("what_would_change_my_mind", []) or [],
-        "counter_arguments": parsed.get("counter_arguments", []) or [],
+        "executive_summary": str(out.get("executive_summary", ""))[:3000],
+        "sections": sections,
+        "claims": claims,
+        "contradictions": [str(c) for c in (out.get("contradictions") or []) if c],
+        "gaps": [str(g) for g in (out.get("gaps") or []) if g],
+        "what_would_change_my_mind": [str(w) for w in (out.get("what_would_change_my_mind") or []) if w],
+        "counter_arguments": [str(c) for c in (out.get("counter_arguments") or []) if c],
     }

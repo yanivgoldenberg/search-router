@@ -80,7 +80,7 @@ def run_research(req: ResearchRequest) -> ResearchReport:
     if req.mode == "general" and _re_mode.match(r'^\s*(who\s+(is|was)|tell\s+me\s+about)\s+\w', req.q, _re_mode.IGNORECASE):
         detected_mode = "people"
         logger.info("[research] auto-detected person-query, switching to mode=people")
-    plan = decompose(req.q, max_sub_questions=req.max_sub_questions, mode=detected_mode)
+    plan = decompose(req.q, max_sub_questions=max(req.max_sub_questions, 8), mode=detected_mode)
     plan = _apply_mode_search_bias(plan, detected_mode)
     logger.info("[research] decomposed into %d sub-questions", len(plan.sub_questions))
 
@@ -154,12 +154,24 @@ def run_research(req: ResearchRequest) -> ResearchReport:
 
     verified, unverified = verify_claims(all_claims, sources_list)
 
-    if use_longctx:
+    if req.tier == 'ultra' and len(sources_list) > 0:
+        os.environ.setdefault("OPENROUTER_MODEL", "meta-llama/llama-4-scout:free")
+        logger.info("[research] tier=ultra: long-context synth via OpenRouter Llama-4-Scout (%d sources)", len(sources_list))
+        ultra_out = synthesize_longctx(req.q, sources_list, target_model="openrouter")
+        if ultra_out.get("executive_summary") and not ultra_out["executive_summary"].startswith("Long-context"):
+            final = ultra_out
+            ultra_claims = ultra_out.get("claims", [])
+            if ultra_claims:
+                verified, unverified = verify_claims(ultra_claims, sources_list)
+        else:
+            final = synthesize(req.q, verified, sources_list)
+    elif use_longctx:
         logger.info("[research] using long-context synthesis (OpenRouter, %d sources)", len(sources_list))
         final = synthesize_longctx(req.q, sources_list)
     else:
         final = synthesize(req.q, verified, sources_list)
-    if req.tier == 'premium' or (req.tier == 'ultra' and not use_longctx):
+
+    if req.tier in ('premium', 'ultra'):
         final = adversarial_pass(req.q, final, verified, sources_list)
 
     report = ResearchReport(
