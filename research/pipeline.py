@@ -6,6 +6,7 @@ import os
 import time
 
 from .decompose import decompose
+from .disambiguate import disambiguate_sources
 from .extract import extract_all
 from .fetch import fetch_all
 from .models import (
@@ -98,7 +99,15 @@ def run_research(req: ResearchRequest) -> ResearchReport:
         for s in fetched:
             all_sources[s.url] = s
 
-        extracted = extract_all(req.q, fetched, max_workers=1)
+        kept, _disamb_decisions = disambiguate_sources(req.q, fetched)
+        if len(kept) < len(fetched):
+            logger.info("[research] disambiguation dropped %d/%d sources", len(fetched) - len(kept), len(fetched))
+            dropped_urls = {s.url for s in fetched} - {s.url for s in kept}
+            for url in dropped_urls:
+                if url in all_sources:
+                    all_sources[url].body = None
+
+        extracted = extract_all(req.q, kept, max_workers=1)
         all_extracted.extend(extracted)
 
         all_claims = [c for ex in all_extracted for c in ex.claims]
