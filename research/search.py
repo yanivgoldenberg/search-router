@@ -150,20 +150,53 @@ def fanout_search(sub_questions: list[SubQuestion], num_per_query: int = 8) -> l
     return sources
 
 
-def rank_and_trim(sources: list[SourceMeta], max_sources: int) -> list[SourceMeta]:
-    """Trim to top N by simple heuristic: prefer non-generic providers + longer snippets."""
+def rank_and_trim(sources: list[SourceMeta], max_sources: int, query_terms: list[str] | None = None) -> list[SourceMeta]:
+    """Trim to top N. Boost domain-matches-query-name (huge), authoritative providers, etc."""
+    qt = [t.lower() for t in (query_terms or []) if len(t) > 2]
+
     def score(s: SourceMeta) -> float:
+        url_l = s.url.lower()
+        title_l = s.title.lower() if s.title else ""
         sc = 0.0
-        if s.provider.startswith(("serper", "exa", "tavily", "openalex", "arxiv", "pubmed", "crossref")):
-            sc += 2.0
-        if "wikipedia" in s.url.lower():
+
+        # === DOMAIN-MATCHES-QUERY-NAME (the unlock) ===
+        # If domain contains query name tokens, MASSIVE boost — likely canonical
+        if qt:
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(s.url).netloc.lower().replace("www.", "")
+                domain_tokens = host.replace("-", "").replace(".", "")
+                # ALL query tokens appear in domain → +5.0 (canonical match)
+                if all(t.replace(" ", "") in domain_tokens for t in qt):
+                    sc += 5.0
+                # Most query tokens appear → +2.5
+                elif sum(1 for t in qt if t.replace(" ", "") in domain_tokens) >= max(1, len(qt) - 1):
+                    sc += 2.5
+                # Title includes ALL query tokens → +1.5 (very relevant page)
+                if title_l and all(t in title_l for t in qt):
+                    sc += 1.5
+            except Exception:
+                pass
+
+        # Provider trust
+        if s.provider.startswith(("serper", "exa", "tavily")):
+            sc += 1.0
+        if s.provider.startswith(("openalex", "arxiv", "pubmed", "crossref", "sec.edgar")):
             sc += 1.5
+        if "wikipedia" in url_l:
+            sc += 1.5
+        # Personal/social-pro signals (helpful for "who is X" queries)
+        if any(d in url_l for d in ("linkedin.com/in/", "github.com/", "crunchbase.com/person/")):
+            sc += 1.5
+        # Snippet length
         if s.snippet:
             sc += min(len(s.snippet) / 500, 1.0)
-        if s.url.endswith(".pdf"):
-            sc += 0.8
-        bad = ("pinterest", "facebook.com/", "instagram.com/", "twitter.com/intent", "tiktok.com/")
-        if any(b in s.url.lower() for b in bad):
+        # PDFs - small boost (was 0.8, now 0.4 to avoid drowning canonical sites)
+        if url_l.endswith(".pdf"):
+            sc += 0.4
+        # Penalize generic dump sites
+        bad = ("pinterest", "facebook.com/", "instagram.com/", "twitter.com/intent", "tiktok.com/", "soundcloud.com/")
+        if any(b in url_l for b in bad):
             sc -= 1.5
         return sc
 

@@ -62,8 +62,14 @@ def run_research(req: ResearchRequest) -> ResearchReport:
     logger.info("[research] question=%s mode=%s max_sources=%d iterations=%d",
                 req.q[:80], req.mode, req.max_sources, req.iterations)
 
-    plan = decompose(req.q, max_sub_questions=req.max_sub_questions, mode=req.mode)
-    plan = _apply_mode_search_bias(plan, req.mode)
+    # Auto-detect person-query intent: bump to people mode if query starts with "who is/was"
+    detected_mode = req.mode
+    import re as _re_mode
+    if req.mode == "general" and _re_mode.match(r'^\s*(who\s+(is|was)|tell\s+me\s+about)\s+\w', req.q, _re_mode.IGNORECASE):
+        detected_mode = "people"
+        logger.info("[research] auto-detected person-query, switching to mode=people")
+    plan = decompose(req.q, max_sub_questions=req.max_sub_questions, mode=detected_mode)
+    plan = _apply_mode_search_bias(plan, detected_mode)
     logger.info("[research] decomposed into %d sub-questions", len(plan.sub_questions))
 
     all_sources: dict[str, SourceMeta] = {}
@@ -81,7 +87,9 @@ def run_research(req: ResearchRequest) -> ResearchReport:
             all_sources[s.url] = s
 
         budget = max(5, req.max_sources - sum(1 for s in all_sources.values() if s.body))
-        ranked = rank_and_trim(new_sources, max_sources=budget)
+        import re as _re
+        _terms = [t for t in _re.findall(r'\w+', req.q.lower()) if len(t) > 2 and t not in ('who','what','how','why','when','the','for','and','about','with')]
+        ranked = rank_and_trim(new_sources, max_sources=budget, query_terms=_terms)
         if not ranked:
             logger.info("[research] no new sources to fetch this iteration")
             break
