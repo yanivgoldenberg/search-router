@@ -122,11 +122,25 @@ f.addEventListener('submit', async (e) => {
 
 async function poll(jobId) {
   if (polling) clearInterval(polling);
+  let transientFails = 0;
   polling = setInterval(async () => {
+    const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
     try {
       const r = await fetch('/v1/research/' + jobId);
+      const ct = r.headers.get('content-type') || '';
+      if (!r.ok || !ct.includes('application/json')) {
+        transientFails++;
+        if (transientFails >= 5) {
+          clearInterval(polling);
+          statusMsg(`Poll error: ${r.status} ${r.statusText} (gave up after 5 retries)`, 'error');
+          go.disabled = false;
+        } else {
+          statusMsg(`Researching... ${elapsed}s elapsed (proxy hiccup ${transientFails}/5, retrying)`);
+        }
+        return;
+      }
+      transientFails = 0;
       const data = await r.json();
-      const elapsed = ((Date.now() - startTs) / 1000).toFixed(0);
       if (data.status === 'complete') {
         clearInterval(polling);
         statusMsg(`Complete in ${elapsed}s · ${data.report?.sources_read}/${data.report?.sources_searched} sources · ${data.report?.claims?.length} claims`, 'complete');
@@ -140,9 +154,14 @@ async function poll(jobId) {
         statusMsg(`Researching... ${elapsed}s elapsed`);
       }
     } catch (e) {
-      clearInterval(polling);
-      statusMsg('Poll error: ' + e.message, 'error');
-      go.disabled = false;
+      transientFails++;
+      if (transientFails >= 5) {
+        clearInterval(polling);
+        statusMsg('Poll error: ' + e.message + ' (gave up after 5 retries)', 'error');
+        go.disabled = false;
+      } else {
+        statusMsg(`Researching... ${elapsed}s elapsed (network blip ${transientFails}/5, retrying)`);
+      }
     }
   }, 8000);
 }
