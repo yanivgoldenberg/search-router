@@ -47,7 +47,7 @@ def synthesize(question: str, claims: list[ExtractedClaim], sources: list[Source
     claims_block, idx_to_url = _format_claims_block(claims, sources)
 
     system = (
-        "You are a senior research analyst. Synthesize the user's research question using ONLY "
+        "Output JSON only (no prose, no markdown fences before or after). You are a senior research analyst. Synthesize the user's research question using ONLY "
         "the verified claims provided. Each claim has a [N] citation index — use them inline.\n\n"
         "STRICT RULES:\n"
         "- Cite every factual statement using [N] indices.\n"

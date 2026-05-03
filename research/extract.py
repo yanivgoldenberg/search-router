@@ -18,7 +18,7 @@ def _extract_one(question: str, src: SourceMeta) -> ExtractedSourceFacts:
         return ExtractedSourceFacts(url=src.url)
 
     system = (
-        "Extract facts from the source document that are relevant to the user's research question. "
+        "Output JSON only (no prose, no markdown fences). Extract facts from the source document that are relevant to the user's research question. "
         "Output JSON only.\n\n"
         "Rules:\n"
         "- Each claim must include an EXACT verbatim quote from the source (1-2 sentences max).\n"

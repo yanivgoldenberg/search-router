@@ -178,8 +178,8 @@ def _parse_json(raw: str) -> Any:
 
 def _openai_compat_call(provider: str, url: str, key: str, model: str, messages, max_tokens, temperature, json_mode) -> str:
     payload: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
+    # NOTE: we deliberately do NOT use response_format=json_object — Groq's strict
+    # validator rejects valid-but-not-bare JSON. Our _parse_json strips ``` fences.
     last_err = ""
     for attempt in range(3):
         try:
@@ -234,8 +234,8 @@ def _openrouter(messages, max_tokens, temperature, json_mode) -> str:
     model = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
     headers_extra = {"HTTP-Referer": "https://aisearch.yanivgoldenberg.com", "X-Title": "aisearch-research"}
     payload: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
+    # NOTE: we deliberately do NOT use response_format=json_object — Groq's strict
+    # validator rejects valid-but-not-bare JSON. Our _parse_json strips ``` fences.
     key = os.environ["OPENROUTER_API_KEY"]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json", **headers_extra}
     last_err = ""

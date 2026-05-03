@@ -26,7 +26,7 @@ MODE_HINTS = {
 def decompose(question: str, max_sub_questions: int = 8, mode: str = "general") -> DecomposedPlan:
     hint = MODE_HINTS.get(mode, MODE_HINTS["general"])
     system = (
-        "You are a research planner. Given a question, break it into independent sub-questions "
+        "Output JSON only (no prose, no markdown fences). You are a research planner. Given a question, break it into independent sub-questions "
         "that, when answered together, fully answer the original. For each sub-question, generate "
         "3-5 specific search queries (different phrasings, time windows, source-type hints). "
         "Each search query must be self-contained.\n\n"
